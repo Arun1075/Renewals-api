@@ -14,9 +14,13 @@ class RenewalController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $renewals = Renewal::all();
+        $renewals = Renewal::where('user_id', auth()->id())
+            ->when($request->category, fn($q) => $q->where('category', $request->category))
+            ->when($request->status, fn($q) => $q->where('status', $request->status))
+            ->when($request->due_date, fn($q) => $q->whereDate('end_date', '<=', $request->due_date))
+            ->get();
         
         return response()->json([
             'status' => 'success',
@@ -31,14 +35,14 @@ class RenewalController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'service_name' => 'required|string|max:255',
-            'service_type' => 'required|string|max:255',
-            'provider' => 'required|string|max:255',
+            'item_name' => 'required|string|max:255',
+            'category' => 'required|string|max:255',
+            'vendor' => 'nullable|string|max:255',
             'start_date' => 'required|date',
-            'end_date' => 'required|date|after_or_equal:start_date',
-            'cost' => 'required|numeric|min:0',
-            'reminder_type' => 'required|string|max:255',
-            'notes' => 'nullable|string'
+            'end_date' => 'required|date|after:start_date',
+            'reminder_days_before' => 'required|integer|min:1',
+            'notes' => 'nullable|string',
+            'cost' => 'nullable|numeric|min:0'
         ]);
 
         if ($validator->fails()) {
@@ -49,7 +53,11 @@ class RenewalController extends Controller
             ], 422);
         }
 
-        $renewal = Renewal::create($request->all());
+        $data = $request->all();
+        $data['user_id'] = auth()->id();
+        $data['status'] = 'active';
+
+        $renewal = Renewal::create($data);
 
         return response()->json([
             'status' => 'success',
@@ -84,23 +92,15 @@ class RenewalController extends Controller
      */
     public function update(Request $request, string $id): JsonResponse
     {
-        $renewal = Renewal::find($id);
-
-        if (!$renewal) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Renewal not found'
-            ], 404);
-        }
+        $renewal = Renewal::where('user_id', auth()->id())->findOrFail($id);
 
         $validator = Validator::make($request->all(), [
-            'service_name' => 'sometimes|required|string|max:255',
-            'service_type' => 'sometimes|required|string|max:255',
-            'provider' => 'sometimes|required|string|max:255',
-            'start_date' => 'sometimes|required|date',
-            'end_date' => 'sometimes|required|date|after_or_equal:start_date',
-            'cost' => 'sometimes|required|numeric|min:0',
-            'reminder_type' => 'sometimes|required|string|max:255',
+            'item_name' => 'sometimes|string|max:255',
+            'category' => 'sometimes|string|max:255',
+            'vendor' => 'nullable|string|max:255',
+            'start_date' => 'sometimes|date',
+            'end_date' => 'sometimes|date|after:start_date',
+            'reminder_days_before' => 'sometimes|integer|min:1',
             'notes' => 'nullable|string'
         ]);
 
@@ -243,6 +243,55 @@ class RenewalController extends Controller
 
         return response()->json([
             'success' => true
+        ]);
+    }
+
+    /**
+     * Update the status of a renewal.
+     *
+     * @param Request $request
+     * @param string $id
+     * @return JsonResponse
+     */
+    public function updateStatus(Request $request, string $id): JsonResponse
+    {
+        $renewal = Renewal::where('user_id', auth()->id())->find($id);
+
+        if (!$renewal) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Renewal not found'
+            ], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'status' => 'required|in:active,renewed,inactive,cancelled',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date|after:start_date',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $renewal->update($request->only('status', 'start_date', 'end_date'));
+        
+        // Log the status change
+        \App\Models\RenewalLog::create([
+            'renewal_id' => $renewal->id,
+            'action' => 'Status updated to ' . $request->status,
+            'date' => now(),
+            'created_by' => auth()->id()
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Renewal status updated successfully',
+            'data' => $renewal
         ]);
     }
 }

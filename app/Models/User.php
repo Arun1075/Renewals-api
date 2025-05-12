@@ -23,6 +23,10 @@ class User extends Authenticatable
         'email',
         'password',
         'is_admin',
+        'email_enabled',
+        'sms_enabled',
+        'in_app_enabled',
+        'phone_number',
     ];
 
     /**
@@ -46,6 +50,9 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_admin' => 'boolean',
+            'email_enabled' => 'boolean',
+            'sms_enabled' => 'boolean',
+            'in_app_enabled' => 'boolean',
         ];
     }
 
@@ -57,5 +64,13 @@ class User extends Authenticatable
     public function isAdmin(): bool
     {
         return $this->is_admin === true;
+    }
+
+    /**
+     * Get all renewals belonging to this user
+     */
+    public function renewals()
+    {
+        return $this->hasMany(Renewal::class);
     }
 }
